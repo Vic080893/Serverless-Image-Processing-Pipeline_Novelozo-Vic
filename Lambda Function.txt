@@ -1,17 +1,27 @@
+// Import necessary AWS SDK clients and commands for S3
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+// Import sharp for image processing
 import sharp from "sharp";
 
+// Create an S3 client instance
 const S3 = new S3Client();
+
+// Define thumbnail width for resized images
 const THUMBNAIL_WIDTH = 200;
+
+// Supported image formats
 const SUPPORTED_FORMATS = { jpg: true, jpeg: true, png: true };
 
+// Lambda handler function triggered by Step Functions
 export const handler = async (event) => {
   console.log("Received event from Step Functions:", event);
 
+  // Extract required fields from the event object
   const srcBucket = event.sourceBucket;
   const destBucket = event.destinationBucket;
   const srcKey = event.imageKey;
 
+  // Validate input fields
   if (!srcBucket || !destBucket || !srcKey) {
     return {
       statusCode: 400,
@@ -19,12 +29,14 @@ export const handler = async (event) => {
     };
   }
 
+  // Extract file extension and check if it's supported
   const ext = srcKey.split(".").pop().toLowerCase();
   if (!SUPPORTED_FORMATS[ext]) {
     return { statusCode: 415, message: `Unsupported file type: ${ext}` };
   }
 
   try {
+    // Get the object from the source S3 bucket
     const { Body, ContentType } = await S3.send(
       new GetObjectCommand({
         Bucket: srcBucket,
@@ -32,24 +44,30 @@ export const handler = async (event) => {
       })
     );
 
+    // Convert the S3 object body into a byte array
     const image = await Body.transformToByteArray();
+
+    // Use sharp to resize the image to the defined thumbnail width
     const resized = await sharp(image).resize(THUMBNAIL_WIDTH).toBuffer();
 
+    // Upload the resized image to the destination S3 bucket
     await S3.send(
       new PutObjectCommand({
         Bucket: destBucket,
-        Key: srcKey,
-        Body: resized,
-        ContentType,
+        Key: srcKey,      // Keep the same file name
+        Body: resized,    // Resized image data
+        ContentType,      // Preserve original content type
       })
     );
 
+    // Return success response
     return {
       statusCode: 200,
       message: `Resized image saved to ${destBucket}/${srcKey}`
     };
 
   } catch (err) {
+    // Log and return error if resizing or S3 operations fail
     console.error("Error resizing:", err);
     return {
       statusCode: 500,
