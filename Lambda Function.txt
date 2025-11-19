@@ -1,0 +1,60 @@
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import sharp from "sharp";
+
+const S3 = new S3Client();
+const THUMBNAIL_WIDTH = 200;
+const SUPPORTED_FORMATS = { jpg: true, jpeg: true, png: true };
+
+export const handler = async (event) => {
+  console.log("Received event from Step Functions:", event);
+
+  const srcBucket = event.sourceBucket;
+  const destBucket = event.destinationBucket;
+  const srcKey = event.imageKey;
+
+  if (!srcBucket || !destBucket || !srcKey) {
+    return {
+      statusCode: 400,
+      message: "Missing required fields: sourceBucket, destinationBucket, imageKey"
+    };
+  }
+
+  const ext = srcKey.split(".").pop().toLowerCase();
+  if (!SUPPORTED_FORMATS[ext]) {
+    return { statusCode: 415, message: `Unsupported file type: ${ext}` };
+  }
+
+  try {
+    const { Body, ContentType } = await S3.send(
+      new GetObjectCommand({
+        Bucket: srcBucket,
+        Key: srcKey,
+      })
+    );
+
+    const image = await Body.transformToByteArray();
+    const resized = await sharp(image).resize(THUMBNAIL_WIDTH).toBuffer();
+
+    await S3.send(
+      new PutObjectCommand({
+        Bucket: destBucket,
+        Key: srcKey,
+        Body: resized,
+        ContentType,
+      })
+    );
+
+    return {
+      statusCode: 200,
+      message: `Resized image saved to ${destBucket}/${srcKey}`
+    };
+
+  } catch (err) {
+    console.error("Error resizing:", err);
+    return {
+      statusCode: 500,
+      message: "Resize failed",
+      error: err.message
+    };
+  }
+};
